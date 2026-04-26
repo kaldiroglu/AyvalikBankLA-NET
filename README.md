@@ -42,13 +42,13 @@ AyvalikBankLA.Tests/
 ## Architectural notes
 
 - **Anemic entities** — `Customer`, `Account`, `Transaction` are plain POCOs with auto-properties only
-- **Fat services** — `CustomerService` and `AccountService` own all business logic
+- **Fat services** — `CustomerService` and `AccountService` own all business logic, including type-specific dispatch (`if (type == ...)`)
+- **Single `Account` table with `Type` discriminator** + nullable type-specific columns (overdraft, interest rate, principal, maturity date, etc.) — preserves the layered/anemic style
+- **Customer tiers** (`STANDARD / PREMIUM / PRIVATE`) on `Customer`, with extension-method policy data: `FeeMultiplier` (1.0×/0.5×/0.0×) and per-transaction caps
 - **No repository abstraction** — services depend on `BankDbContext` directly (Spring Data equivalent in .NET style)
 - **`decimal` for money** — no `BigDecimal` ceremony like the Java sibling
 
 ## Endpoints
-
-(Same surface as `AyvalikBankLA1`. Account types and customer tiers are not yet ported — see "Next steps" below.)
 
 | Method | Path | Role |
 |---|---|---|
@@ -59,8 +59,13 @@ AyvalikBankLA.Tests/
 | PUT | `/api/admin/accounts/{id}/freeze` | ADMIN |
 | PUT | `/api/admin/accounts/{id}/unfreeze` | ADMIN |
 | PUT | `/api/admin/accounts/{id}/close` | ADMIN |
+| PUT | `/api/admin/customers/{id}/tier` | ADMIN |
+| PUT | `/api/admin/accounts/{id}/accrue-interest` | ADMIN |
+| PUT | `/api/admin/accounts/{id}/mature` | ADMIN |
 | PUT | `/api/customers/{id}/password` | CUSTOMER |
-| POST | `/api/accounts?ownerId=` | CUSTOMER |
+| POST | `/api/accounts/checking?ownerId=` | CUSTOMER |
+| POST | `/api/accounts/savings?ownerId=` | CUSTOMER |
+| POST | `/api/accounts/time-deposit?ownerId=` | CUSTOMER |
 | GET | `/api/customers/{id}/accounts` | CUSTOMER |
 | GET | `/api/accounts/{id}/balance` | CUSTOMER |
 | POST | `/api/accounts/{id}/deposit` | CUSTOMER |
@@ -68,9 +73,9 @@ AyvalikBankLA.Tests/
 | POST | `/api/accounts/{id}/transfer` | CUSTOMER |
 | GET | `/api/accounts/{id}/transactions` | CUSTOMER |
 
-## Next steps (not yet ported from `AyvalikBankLA1`)
+## Test coverage
 
-- **Account types** (CHECKING / SAVINGS / TIME_DEPOSIT) with overdraft, monthly interest accrual, time-deposit maturation
-- **Customer tiers** (STANDARD / PREMIUM / PRIVATE) with fee multiplier and per-transaction caps
-- More tests (currently 9; Java sibling has 119)
-- E2E tests with `WebApplicationFactory`
+28 unit tests (xUnit + FluentAssertions, EF Core InMemory for service tests), covering:
+- TransferService tier-aware fees and per-transaction limits
+- CustomerTier policy data
+- AccountService: opens per type, time-deposit deposit/transfer rejection, checking overdraft happy + cap rejection, tier-cap rejection, premium fee discount, savings monthly accrual
