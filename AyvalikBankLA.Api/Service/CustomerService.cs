@@ -25,6 +25,7 @@ public class CustomerService
             Name = name,
             Email = email,
             Role = "CUSTOMER",
+            Tier = CustomerTier.STANDARD,
             CurrentPassword = BCrypt.Net.BCrypt.HashPassword(rawPassword, workFactor: 12)
         };
         _db.Customers.Add(customer);
@@ -51,6 +52,14 @@ public class CustomerService
         if (BCrypt.Net.BCrypt.Verify(rawNewPassword, customer.CurrentPassword))
             throw new PasswordReusedException("New password must differ from the current one");
         customer.CurrentPassword = BCrypt.Net.BCrypt.HashPassword(rawNewPassword, workFactor: 12);
+        await _db.SaveChangesAsync();
+    }
+
+    public async Task ChangeCustomerTierAsync(Guid customerId, CustomerTier newTier)
+    {
+        var customer = await _db.Customers.FindAsync(customerId)
+            ?? throw new CustomerNotFoundException($"Customer not found: {customerId}");
+        customer.Tier = newTier;
         await _db.SaveChangesAsync();
     }
 }

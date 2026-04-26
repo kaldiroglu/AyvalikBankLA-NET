@@ -11,7 +11,23 @@ public record CreateCustomerRequest(
 
 public record ChangePasswordRequest([Required] string NewPassword);
 
-public record CreateAccountRequest([Required] Currency Currency);
+public record CreateCheckingAccountRequest(
+    [Required] Currency Currency,
+    decimal? OverdraftLimit);
+
+public record CreateSavingsAccountRequest(
+    [Required] Currency Currency,
+    [Required, Range(typeof(decimal), "0", "10")] decimal AnnualInterestRate);
+
+public record CreateTimeDepositAccountRequest(
+    [Required] Currency Currency,
+    [Required, Range(typeof(decimal), "0.01", "999999999")] decimal Principal,
+    [Required] DateOnly MaturityDate,
+    [Required, Range(typeof(decimal), "0", "10")] decimal AnnualInterestRate);
+
+public record AccrueInterestRequest(
+    [Required, Range(2000, 2100)] int Year,
+    [Required, Range(1, 12)] int Month);
 
 public record MoneyOperationRequest(
     [Required, Range(typeof(decimal), "0.01", "999999999")] decimal Amount,
@@ -25,16 +41,24 @@ public record TransferRequest(
 public record SetTransferFeeRequest(
     [Required, Range(typeof(decimal), "0", "100")] decimal FeePercent);
 
+public record ChangeCustomerTierRequest([Required] CustomerTier Tier);
+
 // Responses
-public record CustomerResponse(Guid Id, string Name, string Email, string Role)
+public record CustomerResponse(Guid Id, string Name, string Email, string Role, string Tier)
 {
-    public static CustomerResponse From(Customer c) => new(c.Id, c.Name, c.Email, c.Role);
+    public static CustomerResponse From(Customer c) =>
+        new(c.Id, c.Name, c.Email, c.Role, c.Tier.ToString());
 }
 
-public record AccountResponse(Guid Id, Guid OwnerId, string Currency, decimal Balance, string Status)
+public record AccountResponse(
+    Guid Id, Guid OwnerId, string Currency, decimal Balance, string Status, string Type,
+    decimal? OverdraftLimit, decimal? InterestRate, DateOnly? LastAccrualDate,
+    decimal? Principal, DateOnly? OpenedOn, DateOnly? MaturityDate, bool? Matured)
 {
     public static AccountResponse From(Account a) =>
-        new(a.Id, a.OwnerId, a.Currency.ToString(), a.Balance, a.Status.ToString());
+        new(a.Id, a.OwnerId, a.Currency.ToString(), a.Balance, a.Status.ToString(), a.Type.ToString(),
+            a.OverdraftLimit, a.InterestRate, a.LastAccrualDate,
+            a.Principal, a.OpenedOn, a.MaturityDate, a.Matured);
 }
 
 public record BalanceResponse(decimal Amount, string Currency)

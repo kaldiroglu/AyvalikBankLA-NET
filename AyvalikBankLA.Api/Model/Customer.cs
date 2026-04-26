@@ -7,5 +7,6 @@ public class Customer
     public string Name { get; set; } = "";
     public string Email { get; set; } = "";
     public string Role { get; set; } = "CUSTOMER";
+    public CustomerTier Tier { get; set; } = CustomerTier.STANDARD;
     public string CurrentPassword { get; set; } = "";
 }

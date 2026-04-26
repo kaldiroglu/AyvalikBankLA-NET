@@ -46,4 +46,25 @@ public class AdminController(CustomerService customerService, AccountService acc
 
     [HttpPut("accounts/{id:guid}/close")]
     public async Task<IActionResult> Close(Guid id) { await accountService.CloseAccountAsync(id); return Ok(); }
+
+    [HttpPut("customers/{id:guid}/tier")]
+    public async Task<IActionResult> ChangeTier(Guid id, [FromBody] ChangeCustomerTierRequest req)
+    {
+        await customerService.ChangeCustomerTierAsync(id, req.Tier);
+        return Ok();
+    }
+
+    [HttpPut("accounts/{id:guid}/accrue-interest")]
+    public async Task<IActionResult> AccrueInterest(Guid id, [FromBody] AccrueInterestRequest req)
+    {
+        var tx = await accountService.AccrueInterestAsync(id, req.Year, req.Month);
+        return Ok(TransactionResponse.From(tx));
+    }
+
+    [HttpPut("accounts/{id:guid}/mature")]
+    public async Task<IActionResult> Mature(Guid id)
+    {
+        var tx = await accountService.MatureTimeDepositAsync(id);
+        return Ok(TransactionResponse.From(tx));
+    }
 }

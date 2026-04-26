@@ -7,6 +7,7 @@ namespace AyvalikBankLA.Api.Service;
 
 public class AccountService
 {
+    private const int MonthsPerYear = 12;
     private readonly BankDbContext _db;
     private readonly TransferService _transferService;
 
@@ -16,33 +17,87 @@ public class AccountService
         _transferService = transferService;
     }
 
-    public async Task<Account> CreateAccountAsync(Guid ownerId, Currency currency)
+    // ── Account opening (one method per type) ─────────────────────────────
+
+    public async Task<Account> CreateCheckingAccountAsync(Guid ownerId, Currency currency, decimal? overdraftLimit)
     {
-        if (!await _db.Customers.AnyAsync(c => c.Id == ownerId))
-            throw new CustomerNotFoundException($"Customer not found: {ownerId}");
+        await RequireCustomerExistsAsync(ownerId);
+        var od = overdraftLimit ?? 0m;
+        if (od < 0) throw new ArgumentException("Overdraft limit cannot be negative");
         var account = new Account
         {
             Id = Guid.NewGuid(),
             OwnerId = ownerId,
             Currency = currency,
             Balance = 0m,
-            Status = AccountStatus.ACTIVE
+            Status = AccountStatus.ACTIVE,
+            Type = AccountType.CHECKING,
+            OverdraftLimit = od
         };
         _db.Accounts.Add(account);
         await _db.SaveChangesAsync();
         return account;
     }
 
+    public async Task<Account> CreateSavingsAccountAsync(Guid ownerId, Currency currency, decimal annualInterestRate)
+    {
+        await RequireCustomerExistsAsync(ownerId);
+        if (annualInterestRate < 0) throw new ArgumentException("Annual interest rate must be non-negative");
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            Currency = currency,
+            Balance = 0m,
+            Status = AccountStatus.ACTIVE,
+            Type = AccountType.SAVINGS,
+            InterestRate = annualInterestRate
+        };
+        _db.Accounts.Add(account);
+        await _db.SaveChangesAsync();
+        return account;
+    }
+
+    public async Task<Account> CreateTimeDepositAccountAsync(Guid ownerId, Currency currency,
+        decimal principal, DateOnly maturityDate, decimal annualInterestRate)
+    {
+        await RequireCustomerExistsAsync(ownerId);
+        if (principal <= 0) throw new ArgumentException("Principal must be positive");
+        if (annualInterestRate < 0) throw new ArgumentException("Annual interest rate must be non-negative");
+        var openedOn = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (maturityDate <= openedOn) throw new ArgumentException("Maturity date must be after today");
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            Currency = currency,
+            Balance = principal,
+            Status = AccountStatus.ACTIVE,
+            Type = AccountType.TIME_DEPOSIT,
+            Principal = principal,
+            OpenedOn = openedOn,
+            MaturityDate = maturityDate,
+            InterestRate = annualInterestRate,
+            Matured = false
+        };
+        _db.Accounts.Add(account);
+        await _db.SaveChangesAsync();
+        return account;
+    }
+
+    // ── Account operations ────────────────────────────────────────────────
+
     public async Task<Transaction> DepositAsync(Guid accountId, decimal amount, Currency currency)
     {
         var account = await FindAccountOrThrowAsync(accountId);
         RequireActive(account);
+        if (account.Type == AccountType.TIME_DEPOSIT)
+            throw new AccountNotOperableException("Time deposit principal is locked — further deposits are not allowed");
         if (account.Currency != currency)
             throw new ArgumentException($"Currency mismatch: expected {account.Currency}");
-        if (amount <= 0)
-            throw new ArgumentException("Amount must be positive");
+        if (amount <= 0) throw new ArgumentException("Amount must be positive");
         account.Balance += amount;
-        var tx = await SaveTransactionAsync(accountId, TransactionType.DEPOSIT, amount, currency, "Deposit");
+        var tx = SaveTransaction(accountId, TransactionType.DEPOSIT, amount, currency, "Deposit");
         await _db.SaveChangesAsync();
         return tx;
     }
@@ -53,12 +108,32 @@ public class AccountService
         RequireActive(account);
         if (account.Currency != currency)
             throw new ArgumentException($"Currency mismatch: expected {account.Currency}");
-        if (amount <= 0)
-            throw new ArgumentException("Amount must be positive");
-        if (account.Balance < amount)
+        if (amount <= 0) throw new ArgumentException("Amount must be positive");
+
+        var owner = await FindCustomerOrThrowAsync(account.OwnerId);
+        _transferService.RequireWithdrawalWithinLimit(amount, owner.Tier);
+
+        if (account.Type == AccountType.TIME_DEPOSIT && account.Matured != true)
+            throw new AccountNotOperableException("Time deposit has not matured");
+
+        var projected = account.Balance - amount;
+        if (account.Type == AccountType.CHECKING)
+        {
+            var floor = -(account.OverdraftLimit ?? 0m);
+            if (projected < floor)
+            {
+                if ((account.OverdraftLimit ?? 0m) == 0m)
+                    throw new InsufficientFundsException("Insufficient funds");
+                throw new InsufficientFundsException("Withdrawal exceeds overdraft limit");
+            }
+        }
+        else if (projected < 0m)
+        {
             throw new InsufficientFundsException("Insufficient funds");
-        account.Balance -= amount;
-        var tx = await SaveTransactionAsync(accountId, TransactionType.WITHDRAWAL, amount, currency, "Withdrawal");
+        }
+
+        account.Balance = projected;
+        var tx = SaveTransaction(accountId, TransactionType.WITHDRAWAL, amount, currency, "Withdrawal");
         await _db.SaveChangesAsync();
         return tx;
     }
@@ -69,26 +144,98 @@ public class AccountService
         var target = await FindAccountOrThrowAsync(targetId);
         RequireActive(source);
         RequireActive(target);
+        if (source.Type == AccountType.TIME_DEPOSIT)
+            throw new AccountNotOperableException("Time deposit accounts do not support transfers");
         if (source.Currency != currency || target.Currency != currency)
             throw new ArgumentException("Currency mismatch on source or target");
-        if (amount <= 0)
-            throw new ArgumentException("Amount must be positive");
+        if (amount <= 0) throw new ArgumentException("Amount must be positive");
+
+        var sourceOwner = await FindCustomerOrThrowAsync(source.OwnerId);
+        _transferService.RequireTransferWithinLimit(amount, sourceOwner.Tier);
 
         var sameCustomer = source.OwnerId == target.OwnerId;
         var feePercent = await GetFeePercentAsync();
-        var fee = _transferService.CalculateFee(amount, sameCustomer, feePercent);
+        var fee = _transferService.CalculateFee(amount, sameCustomer, feePercent, sourceOwner.Tier);
         var totalDebit = amount + fee;
-        if (source.Balance < totalDebit)
-            throw new InsufficientFundsException("Insufficient funds for transfer including fee");
 
-        source.Balance -= totalDebit;
+        var projected = source.Balance - totalDebit;
+        if (source.Type == AccountType.CHECKING)
+        {
+            var floor = -(source.OverdraftLimit ?? 0m);
+            if (projected < floor)
+                throw new InsufficientFundsException("Insufficient funds for transfer including fee");
+        }
+        else if (projected < 0m)
+        {
+            throw new InsufficientFundsException("Insufficient funds for transfer including fee");
+        }
+
+        source.Balance = projected;
         target.Balance += amount;
-        await SaveTransactionAsync(sourceId, TransactionType.TRANSFER_OUT, amount, currency,
-            $"Transfer out to {targetId}" + (fee > 0 ? $" (fee: {fee})" : ""));
-        await SaveTransactionAsync(targetId, TransactionType.TRANSFER_IN, amount, currency,
-            $"Transfer in from {sourceId}");
+
+        var outDesc = $"Transfer out to {targetId}" + (fee > 0 ? $" (fee: {fee})" : "");
+        SaveTransaction(sourceId, TransactionType.TRANSFER_OUT, amount, currency, outDesc);
+        SaveTransaction(targetId, TransactionType.TRANSFER_IN, amount, currency, $"Transfer in from {sourceId}");
         await _db.SaveChangesAsync();
     }
+
+    // ── Savings: monthly interest accrual ────────────────────────────────
+
+    public async Task<Transaction> AccrueInterestAsync(Guid accountId, int year, int month)
+    {
+        var account = await FindAccountOrThrowAsync(accountId);
+        if (account.Type != AccountType.SAVINGS)
+            throw new AccountNotOperableException("Account is not a savings account");
+        if (account.Status == AccountStatus.CLOSED)
+            throw new AccountNotOperableException("Cannot accrue interest on a closed account");
+
+        var firstOfNextMonth = new DateOnly(year, month, 1).AddMonths(1);
+        if (account.LastAccrualDate is { } last && firstOfNextMonth <= last)
+            throw new AccountNotOperableException($"Interest already accrued for or after {year:D4}-{month:D2}");
+
+        var monthlyRate = (account.InterestRate ?? 0m) / MonthsPerYear;
+        var interest = Math.Round(account.Balance * monthlyRate, 2, MidpointRounding.AwayFromZero);
+        account.Balance += interest;
+        account.LastAccrualDate = firstOfNextMonth;
+
+        var tx = SaveTransaction(accountId, TransactionType.INTEREST, interest, account.Currency,
+            $"Interest accrual for {year:D4}-{month:D2}");
+        await _db.SaveChangesAsync();
+        return tx;
+    }
+
+    // ── Time deposit: maturation ─────────────────────────────────────────
+
+    public async Task<Transaction> MatureTimeDepositAsync(Guid accountId)
+    {
+        var account = await FindAccountOrThrowAsync(accountId);
+        if (account.Type != AccountType.TIME_DEPOSIT)
+            throw new AccountNotOperableException("Account is not a time deposit");
+        if (account.Status == AccountStatus.CLOSED)
+            throw new AccountNotOperableException("Cannot mature a closed account");
+        if (account.Matured == true)
+            throw new AccountNotOperableException("Account is already matured");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (account.MaturityDate is null || today < account.MaturityDate)
+            throw new AccountNotOperableException("Maturity date not yet reached");
+
+        var months = MonthsBetween(account.OpenedOn!.Value, account.MaturityDate!.Value);
+        var years = (decimal)months / MonthsPerYear;
+        var interest = Math.Round((account.Principal ?? 0m) * (account.InterestRate ?? 0m) * years,
+            2, MidpointRounding.AwayFromZero);
+        account.Balance += interest;
+        account.Matured = true;
+
+        var tx = SaveTransaction(accountId, TransactionType.INTEREST, interest, account.Currency,
+            "Maturity interest credit");
+        await _db.SaveChangesAsync();
+        return tx;
+    }
+
+    private static int MonthsBetween(DateOnly start, DateOnly end) =>
+        (end.Year - start.Year) * 12 + (end.Month - start.Month);
+
+    // ── Read-only queries ─────────────────────────────────────────────────
 
     public async Task<Account> GetAccountAsync(Guid accountId) => await FindAccountOrThrowAsync(accountId);
 
@@ -100,10 +247,11 @@ public class AccountService
 
     public async Task<List<Account>> ListAccountsAsync(Guid ownerId)
     {
-        if (!await _db.Customers.AnyAsync(c => c.Id == ownerId))
-            throw new CustomerNotFoundException($"Customer not found: {ownerId}");
+        await RequireCustomerExistsAsync(ownerId);
         return await _db.Accounts.AsNoTracking().Where(a => a.OwnerId == ownerId).ToListAsync();
     }
+
+    // ── Status transitions ────────────────────────────────────────────────
 
     public async Task FreezeAccountAsync(Guid accountId)
     {
@@ -132,6 +280,8 @@ public class AccountService
         await _db.SaveChangesAsync();
     }
 
+    // ── Settings ──────────────────────────────────────────────────────────
+
     public async Task SetTransferFeePercentAsync(decimal feePercent)
     {
         var settings = await _db.Settings.FindAsync("TRANSFER_FEE_PERCENT")
@@ -142,16 +292,27 @@ public class AccountService
         await _db.SaveChangesAsync();
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────
+
     private void RequireActive(Account a)
     {
         if (a.Status != AccountStatus.ACTIVE)
             throw new AccountNotOperableException($"Account is not active: {a.Status}");
     }
 
+    private async Task RequireCustomerExistsAsync(Guid id)
+    {
+        if (!await _db.Customers.AnyAsync(c => c.Id == id))
+            throw new CustomerNotFoundException($"Customer not found: {id}");
+    }
+
     private async Task<Account> FindAccountOrThrowAsync(Guid id) =>
         await _db.Accounts.FindAsync(id) ?? throw new AccountNotFoundException($"Account not found: {id}");
 
-    private Task<Transaction> SaveTransactionAsync(Guid accountId, TransactionType type, decimal amount, Currency currency, string desc)
+    private async Task<Customer> FindCustomerOrThrowAsync(Guid id) =>
+        await _db.Customers.FindAsync(id) ?? throw new CustomerNotFoundException($"Customer not found: {id}");
+
+    private Transaction SaveTransaction(Guid accountId, TransactionType type, decimal amount, Currency currency, string desc)
     {
         var tx = new Transaction
         {
@@ -164,7 +325,7 @@ public class AccountService
             Description = desc
         };
         _db.Transactions.Add(tx);
-        return Task.FromResult(tx);
+        return tx;
     }
 
     private async Task<decimal> GetFeePercentAsync()

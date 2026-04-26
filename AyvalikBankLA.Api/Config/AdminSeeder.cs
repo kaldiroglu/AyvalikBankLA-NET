@@ -20,6 +20,7 @@ public static class AdminSeeder
                 Name = "System Admin",
                 Email = AdminEmail,
                 Role = "ADMIN",
+                Tier = CustomerTier.STANDARD,
                 CurrentPassword = BCrypt.Net.BCrypt.HashPassword(AdminPassword, workFactor: 12)
             });
         }

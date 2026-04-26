@@ -10,10 +10,25 @@ namespace AyvalikBankLA.Api.Web;
 [Authorize(Roles = "CUSTOMER")]
 public class AccountController(AccountService accountService) : ControllerBase
 {
-    [HttpPost("accounts")]
-    public async Task<IActionResult> Create([FromQuery] Guid ownerId, [FromBody] CreateAccountRequest req)
+    [HttpPost("accounts/checking")]
+    public async Task<IActionResult> CreateChecking([FromQuery] Guid ownerId, [FromBody] CreateCheckingAccountRequest req)
     {
-        var a = await accountService.CreateAccountAsync(ownerId, req.Currency);
+        var a = await accountService.CreateCheckingAccountAsync(ownerId, req.Currency, req.OverdraftLimit);
+        return StatusCode(201, AccountResponse.From(a));
+    }
+
+    [HttpPost("accounts/savings")]
+    public async Task<IActionResult> CreateSavings([FromQuery] Guid ownerId, [FromBody] CreateSavingsAccountRequest req)
+    {
+        var a = await accountService.CreateSavingsAccountAsync(ownerId, req.Currency, req.AnnualInterestRate);
+        return StatusCode(201, AccountResponse.From(a));
+    }
+
+    [HttpPost("accounts/time-deposit")]
+    public async Task<IActionResult> CreateTimeDeposit([FromQuery] Guid ownerId, [FromBody] CreateTimeDepositAccountRequest req)
+    {
+        var a = await accountService.CreateTimeDepositAccountAsync(
+            ownerId, req.Currency, req.Principal, req.MaturityDate, req.AnnualInterestRate);
         return StatusCode(201, AccountResponse.From(a));
     }
 

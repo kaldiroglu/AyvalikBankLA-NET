@@ -22,6 +22,7 @@ public class BankDbContext : DbContext
             b.Property(c => c.Email).IsRequired();
             b.Property(c => c.Name).IsRequired();
             b.Property(c => c.Role).IsRequired();
+            b.Property(c => c.Tier).HasConversion<string>().HasMaxLength(16).IsRequired();
             b.Property(c => c.CurrentPassword).IsRequired();
         });
 
@@ -31,7 +32,11 @@ public class BankDbContext : DbContext
             b.HasKey(a => a.Id);
             b.Property(a => a.Currency).HasConversion<string>().HasMaxLength(8);
             b.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
+            b.Property(a => a.Type).HasConversion<string>().HasMaxLength(16);
             b.Property(a => a.Balance).HasColumnType("numeric(19,2)");
+            b.Property(a => a.OverdraftLimit).HasColumnType("numeric(19,2)");
+            b.Property(a => a.InterestRate).HasColumnType("numeric(10,6)");
+            b.Property(a => a.Principal).HasColumnType("numeric(19,2)");
         });
 
         mb.Entity<Transaction>(b =>

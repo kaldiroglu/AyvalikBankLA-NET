@@ -14,6 +14,7 @@ public class GlobalExceptionHandler : IExceptionHandler
             AccountNotFoundException => (StatusCodes.Status404NotFound, "Account Not Found"),
             InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Insufficient Funds"),
             AccountNotOperableException => (StatusCodes.Status422UnprocessableEntity, "Account Not Operable"),
+            LimitExceededException => (StatusCodes.Status422UnprocessableEntity, "Limit Exceeded"),
             InvalidPasswordException => (StatusCodes.Status400BadRequest, "Invalid Password"),
             PasswordReusedException => (StatusCodes.Status409Conflict, "Password Reused"),
             AyvalikBankLA.Api.Exception.UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "Forbidden"),
