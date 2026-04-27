@@ -1,6 +1,6 @@
 # Ayvalık Bank LA-NET
 
-A banking application built as a learning project to demonstrate **Classic 3-Tier Layered Architecture** in **.NET 9 / ASP.NET Core**. .NET counterpart to `AyvalikBankLA1` (Java/Spring Boot).
+A banking application built as a learning project to demonstrate **Classic 3-Tier Layered Architecture** in **.NET 9 / ASP.NET Core**. .NET counterpart to `AyvalikBankLA-JAVA` (Java/Spring Boot).
 
 ## Tech Stack
 

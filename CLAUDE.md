@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-**Ayvalık Bank LA-NET** — .NET 9 / ASP.NET Core port of `AyvalikBankLA1` (the Java/Spring Boot layered project). Identical use cases, same 3-tier / anemic-model / fat-service style.
+**Ayvalık Bank LA-NET** — .NET 9 / ASP.NET Core port of `AyvalikBankLA-JAVA` (the Java/Spring Boot layered project). Identical use cases, same 3-tier / anemic-model / fat-service style.
 
 ## Commands
 

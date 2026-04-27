@@ -1,6 +1,6 @@
 # Architecture — Ayvalık Bank LA-NET
 
-A .NET 9 / ASP.NET Core port of `AyvalikBankLA1`, organized as a **Classic 3-Tier Layered Architecture**. Anemic entities, fat services, no repository abstraction.
+A .NET 9 / ASP.NET Core port of `AyvalikBankLA-JAVA`, organized as a **Classic 3-Tier Layered Architecture**. Anemic entities, fat services, no repository abstraction.
 
 ---
 
