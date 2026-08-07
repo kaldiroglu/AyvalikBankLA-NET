@@ -17,29 +17,29 @@ public record CreateCheckingAccountRequest(
 
 public record CreateSavingsAccountRequest(
     [Required] Currency Currency,
-    [Required, Range(typeof(decimal), "0", "10")] decimal AnnualInterestRate);
+    [Required, Range(typeof(decimal), "0", "10", ParseLimitsInInvariantCulture = true)] decimal AnnualInterestRate);
 
 public record CreateTimeDepositAccountRequest(
     [Required] Currency Currency,
-    [Required, Range(typeof(decimal), "0.01", "999999999")] decimal Principal,
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)] decimal Principal,
     [Required] DateOnly MaturityDate,
-    [Required, Range(typeof(decimal), "0", "10")] decimal AnnualInterestRate);
+    [Required, Range(typeof(decimal), "0", "10", ParseLimitsInInvariantCulture = true)] decimal AnnualInterestRate);
 
 public record AccrueInterestRequest(
     [Required, Range(2000, 2100)] int Year,
     [Required, Range(1, 12)] int Month);
 
 public record MoneyOperationRequest(
-    [Required, Range(typeof(decimal), "0.01", "999999999")] decimal Amount,
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)] decimal Amount,
     [Required] Currency Currency);
 
 public record TransferRequest(
     [Required] Guid TargetAccountId,
-    [Required, Range(typeof(decimal), "0.01", "999999999")] decimal Amount,
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)] decimal Amount,
     [Required] Currency Currency);
 
 public record SetTransferFeeRequest(
-    [Required, Range(typeof(decimal), "0", "100")] decimal FeePercent);
+    [Required, Range(typeof(decimal), "0", "100", ParseLimitsInInvariantCulture = true)] decimal FeePercent);
 
 public record ChangeCustomerTierRequest([Required] CustomerTier Tier);
 

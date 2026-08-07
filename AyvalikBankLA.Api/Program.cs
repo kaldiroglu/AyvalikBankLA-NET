@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using AyvalikBankLA.Api.Config;
 using AyvalikBankLA.Api.Repository;
 using AyvalikBankLA.Api.Service;
@@ -23,7 +24,13 @@ builder.Services.AddAuthentication(BasicAuthHandler.SchemeName)
 builder.Services.AddAuthorization();
 
 // MVC + global exception handler
-builder.Services.AddControllers();
+// Enums travel as strings ("USD", "PREMIUM"), matching the Java and Python implementations and
+// the documented API. System.Text.Json otherwise expects numeric enum values on the way IN while
+// the response DTOs already emit strings - an asymmetry that made this API unusable by any client
+// written against the others. Pinned by AyvalikBankContractTests.
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
