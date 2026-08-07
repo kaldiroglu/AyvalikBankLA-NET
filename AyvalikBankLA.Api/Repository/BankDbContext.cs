@@ -12,6 +12,21 @@ public class BankDbContext : DbContext
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Settings> Settings => Set<Settings>();
 
+    /// <summary>
+    /// Bumps the optimistic-lock token on every modified account.
+    ///
+    /// <para>Centralised here rather than in each service method because AccountService writes
+    /// accounts from a dozen places; a token that one of them forgets to increment is a guard
+    /// that silently does nothing. Mirrors AyvalikBankHA-JAVA Refactorings.md entry 5.</para>
+    /// </summary>
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in ChangeTracker.Entries<Account>())
+            if (entry.State == EntityState.Modified)
+                entry.Entity.Version++;
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder mb)
     {
         mb.Entity<Customer>(b =>
