@@ -69,7 +69,7 @@ public class AccountServiceTests : IDisposable
         var c = await SeedCustomerAsync();
         var a = await _service.CreateTimeDepositAccountAsync(c.Id, Currency.USD, 1000m,
             DateOnly.FromDateTime(DateTime.UtcNow).AddYears(1), 0.05m);
-        var act = () => _service.DepositAsync(a.Id, 100m, Currency.USD);
+        var act = () => _service.DepositAsync(a.OwnerId, a.Id, 100m, Currency.USD);
         await act.Should().ThrowAsync<AccountNotOperableException>().WithMessage("*locked*");
     }
 
@@ -78,9 +78,9 @@ public class AccountServiceTests : IDisposable
     {
         var c = await SeedCustomerAsync();
         var a = await _service.CreateCheckingAccountAsync(c.Id, Currency.USD, 100m);
-        await _service.DepositAsync(a.Id, 50m, Currency.USD);
-        await _service.WithdrawAsync(a.Id, 120m, Currency.USD);
-        var loaded = await _service.GetAccountAsync(a.Id);
+        await _service.DepositAsync(a.OwnerId, a.Id, 50m, Currency.USD);
+        await _service.WithdrawAsync(a.OwnerId, a.Id, 120m, Currency.USD);
+        var loaded = await _service.GetAccountAsync(a.OwnerId, a.Id);
         loaded.Balance.Should().Be(-70m);
     }
 
@@ -89,7 +89,7 @@ public class AccountServiceTests : IDisposable
     {
         var c = await SeedCustomerAsync();
         var a = await _service.CreateCheckingAccountAsync(c.Id, Currency.USD, 50m);
-        var act = () => _service.WithdrawAsync(a.Id, 60m, Currency.USD);
+        var act = () => _service.WithdrawAsync(a.OwnerId, a.Id, 60m, Currency.USD);
         await act.Should().ThrowAsync<InsufficientFundsException>().WithMessage("*overdraft*");
     }
 
@@ -98,8 +98,8 @@ public class AccountServiceTests : IDisposable
     {
         var c = await SeedCustomerAsync(CustomerTier.STANDARD);
         var a = await _service.CreateCheckingAccountAsync(c.Id, Currency.USD, 100000m);
-        await _service.DepositAsync(a.Id, 10000m, Currency.USD);
-        var act = () => _service.WithdrawAsync(a.Id, 5001m, Currency.USD);
+        await _service.DepositAsync(a.OwnerId, a.Id, 10000m, Currency.USD);
+        var act = () => _service.WithdrawAsync(a.OwnerId, a.Id, 5001m, Currency.USD);
         await act.Should().ThrowAsync<LimitExceededException>().WithMessage("*STANDARD*");
     }
 
@@ -110,10 +110,10 @@ public class AccountServiceTests : IDisposable
         var c2 = await SeedCustomerAsync();
         var src = await _service.CreateCheckingAccountAsync(c1.Id, Currency.USD, 0m);
         var tgt = await _service.CreateCheckingAccountAsync(c2.Id, Currency.USD, 0m);
-        await _service.DepositAsync(src.Id, 1000m, Currency.USD);
+        await _service.DepositAsync(src.OwnerId, src.Id, 1000m, Currency.USD);
         await _service.SetTransferFeePercentAsync(1.0m);
-        await _service.TransferAsync(src.Id, tgt.Id, 200m, Currency.USD);
-        var loaded = await _service.GetAccountAsync(src.Id);
+        await _service.TransferAsync(src.OwnerId, src.Id, tgt.Id, 200m, Currency.USD);
+        var loaded = await _service.GetAccountAsync(src.OwnerId, src.Id);
         // 200 + (1% * 0.5 * 200 = 1.00) = 201 deducted → 799
         loaded.Balance.Should().Be(799m);
     }
@@ -126,7 +126,7 @@ public class AccountServiceTests : IDisposable
         var td = await _service.CreateTimeDepositAccountAsync(c1.Id, Currency.USD, 1000m,
             DateOnly.FromDateTime(DateTime.UtcNow).AddYears(1), 0.05m);
         var tgt = await _service.CreateCheckingAccountAsync(c2.Id, Currency.USD, 0m);
-        var act = () => _service.TransferAsync(td.Id, tgt.Id, 100m, Currency.USD);
+        var act = () => _service.TransferAsync(td.OwnerId, td.Id, tgt.Id, 100m, Currency.USD);
         await act.Should().ThrowAsync<AccountNotOperableException>().WithMessage("*transfers*");
     }
 
@@ -135,11 +135,11 @@ public class AccountServiceTests : IDisposable
     {
         var c = await SeedCustomerAsync();
         var a = await _service.CreateSavingsAccountAsync(c.Id, Currency.USD, 0.12m); // 1% monthly
-        await _service.DepositAsync(a.Id, 1000m, Currency.USD);
+        await _service.DepositAsync(a.OwnerId, a.Id, 1000m, Currency.USD);
         var tx = await _service.AccrueInterestAsync(a.Id, 2026, 4);
         tx.Type.Should().Be(TransactionType.INTEREST);
         tx.Amount.Should().Be(10m);
-        var loaded = await _service.GetAccountAsync(a.Id);
+        var loaded = await _service.GetAccountAsync(a.OwnerId, a.Id);
         loaded.Balance.Should().Be(1010m);
     }
 

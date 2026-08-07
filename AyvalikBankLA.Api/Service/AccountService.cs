@@ -19,15 +19,15 @@ public class AccountService
 
     // ── Account opening (one method per type) ─────────────────────────────
 
-    public async Task<Account> CreateCheckingAccountAsync(Guid ownerId, Currency currency, decimal? overdraftLimit)
+    public async Task<Account> CreateCheckingAccountAsync(Guid callerId, Currency currency, decimal? overdraftLimit)
     {
-        await RequireCustomerExistsAsync(ownerId);
+        await RequireCustomerExistsAsync(callerId);
         var od = overdraftLimit ?? 0m;
         if (od < 0) throw new ArgumentException("Overdraft limit cannot be negative");
         var account = new Account
         {
             Id = Guid.NewGuid(),
-            OwnerId = ownerId,
+            OwnerId = callerId,
             Currency = currency,
             Balance = 0m,
             Status = AccountStatus.ACTIVE,
@@ -39,14 +39,14 @@ public class AccountService
         return account;
     }
 
-    public async Task<Account> CreateSavingsAccountAsync(Guid ownerId, Currency currency, decimal annualInterestRate)
+    public async Task<Account> CreateSavingsAccountAsync(Guid callerId, Currency currency, decimal annualInterestRate)
     {
-        await RequireCustomerExistsAsync(ownerId);
+        await RequireCustomerExistsAsync(callerId);
         if (annualInterestRate < 0) throw new ArgumentException("Annual interest rate must be non-negative");
         var account = new Account
         {
             Id = Guid.NewGuid(),
-            OwnerId = ownerId,
+            OwnerId = callerId,
             Currency = currency,
             Balance = 0m,
             Status = AccountStatus.ACTIVE,
@@ -58,10 +58,10 @@ public class AccountService
         return account;
     }
 
-    public async Task<Account> CreateTimeDepositAccountAsync(Guid ownerId, Currency currency,
+    public async Task<Account> CreateTimeDepositAccountAsync(Guid callerId, Currency currency,
         decimal principal, DateOnly maturityDate, decimal annualInterestRate)
     {
-        await RequireCustomerExistsAsync(ownerId);
+        await RequireCustomerExistsAsync(callerId);
         if (principal <= 0) throw new ArgumentException("Principal must be positive");
         if (annualInterestRate < 0) throw new ArgumentException("Annual interest rate must be non-negative");
         var openedOn = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -69,7 +69,7 @@ public class AccountService
         var account = new Account
         {
             Id = Guid.NewGuid(),
-            OwnerId = ownerId,
+            OwnerId = callerId,
             Currency = currency,
             Balance = principal,
             Status = AccountStatus.ACTIVE,
@@ -87,9 +87,10 @@ public class AccountService
 
     // ── Account operations ────────────────────────────────────────────────
 
-    public async Task<Transaction> DepositAsync(Guid accountId, decimal amount, Currency currency)
+    public async Task<Transaction> DepositAsync(Guid callerId, Guid accountId, decimal amount, Currency currency)
     {
         var account = await FindAccountOrThrowAsync(accountId);
+        RequireOwner(account, callerId);
         RequireActive(account);
         if (account.Type == AccountType.TIME_DEPOSIT)
             throw new AccountNotOperableException("Time deposit principal is locked — further deposits are not allowed");
@@ -102,9 +103,10 @@ public class AccountService
         return tx;
     }
 
-    public async Task<Transaction> WithdrawAsync(Guid accountId, decimal amount, Currency currency)
+    public async Task<Transaction> WithdrawAsync(Guid callerId, Guid accountId, decimal amount, Currency currency)
     {
         var account = await FindAccountOrThrowAsync(accountId);
+        RequireOwner(account, callerId);
         RequireActive(account);
         if (account.Currency != currency)
             throw new ArgumentException($"Currency mismatch: expected {account.Currency}");
@@ -138,9 +140,12 @@ public class AccountService
         return tx;
     }
 
-    public async Task TransferAsync(Guid sourceId, Guid targetId, decimal amount, Currency currency)
+    public async Task TransferAsync(Guid callerId, Guid sourceId, Guid targetId, decimal amount, Currency currency)
     {
         var source = await FindAccountOrThrowAsync(sourceId);
+        RequireOwner(source, callerId);
+        // The TARGET is deliberately NOT ownership-checked: sending money to another
+        // customer is the entire point of a transfer.
         var target = await FindAccountOrThrowAsync(targetId);
         RequireActive(source);
         RequireActive(target);
@@ -237,16 +242,23 @@ public class AccountService
 
     // ── Read-only queries ─────────────────────────────────────────────────
 
-    public async Task<Account> GetAccountAsync(Guid accountId) => await FindAccountOrThrowAsync(accountId);
-
-    public async Task<List<Transaction>> GetTransactionsAsync(Guid accountId)
+    public async Task<Account> GetAccountAsync(Guid callerId, Guid accountId)
     {
+        var account = await FindAccountOrThrowAsync(accountId);
+        RequireOwner(account, callerId);
+        return account;
+    }
+
+    public async Task<List<Transaction>> GetTransactionsAsync(Guid callerId, Guid accountId)
+    {
+        RequireOwner(await FindAccountOrThrowAsync(accountId), callerId);
         await FindAccountOrThrowAsync(accountId);
         return await _db.Transactions.AsNoTracking().Where(t => t.AccountId == accountId).ToListAsync();
     }
 
-    public async Task<List<Account>> ListAccountsAsync(Guid ownerId)
+    public async Task<List<Account>> ListAccountsAsync(Guid callerId, Guid ownerId)
     {
+        RequireSelf(ownerId, callerId);
         await RequireCustomerExistsAsync(ownerId);
         return await _db.Accounts.AsNoTracking().Where(a => a.OwnerId == ownerId).ToListAsync();
     }
@@ -281,6 +293,20 @@ public class AccountService
     }
 
     // ── Settings ──────────────────────────────────────────────────────────
+
+    // Security: the caller must own the account.
+    // Mirrors AyvalikBankHA-JAVA Refactorings.md entry 3.
+    private static void RequireOwner(Account account, Guid callerId)
+    {
+        if (account.OwnerId != callerId)
+            throw new AyvalikBankLA.Api.Exception.UnauthorizedAccessException("Account does not belong to the caller");
+    }
+
+    private static void RequireSelf(Guid subject, Guid callerId)
+    {
+        if (subject != callerId)
+            throw new AyvalikBankLA.Api.Exception.UnauthorizedAccessException("Callers may only act on their own customer record");
+    }
 
     public async Task SetTransferFeePercentAsync(decimal feePercent)
     {

@@ -44,8 +44,12 @@ public class CustomerService
     public Task<List<Customer>> ListCustomersAsync() =>
         _db.Customers.AsNoTracking().ToListAsync();
 
-    public async Task ChangePasswordAsync(Guid customerId, string rawNewPassword)
+    public async Task ChangePasswordAsync(Guid callerId, Guid customerId, string rawNewPassword)
     {
+        // Checked BEFORE the lookup so a caller cannot probe which customer ids exist.
+        if (customerId != callerId)
+            throw new AyvalikBankLA.Api.Exception.UnauthorizedAccessException("Callers may only change their own password");
+
         _validator.Validate(rawNewPassword);
         var customer = await _db.Customers.FindAsync(customerId)
             ?? throw new CustomerNotFoundException($"Customer not found: {customerId}");
