@@ -1,3 +1,4 @@
+using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
 using AyvalikBankLA.Api.Config;
 using AyvalikBankLA.Api.Repository;
@@ -28,6 +29,27 @@ builder.Services.AddAuthorization();
 // the documented API. System.Text.Json otherwise expects numeric enum values on the way IN while
 // the response DTOs already emit strings - an asymmetry that made this API unusable by any client
 // written against the others. Pinned by AyvalikBankContractTests.
+// Browsable API docs at /swagger. The Basic scheme is declared so the "Authorize"
+// button works and endpoints can be tried from the page itself.
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(o =>
+{
+    o.SwaggerDoc("v1", new OpenApiInfo { Title = "Ayvalık Bank LA-NET", Version = "v1" });
+    o.AddSecurityDefinition("basic", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http,
+        Scheme = "basic",
+        Description = "Seeded admin: admin@ayvalikbank.dev / Admin@123!",
+    });
+    o.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme
+        {
+            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "basic" },
+        }] = Array.Empty<string>(),
+    });
+});
+
 builder.Services
     .AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -44,6 +66,9 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseExceptionHandler();
+app.UseSwagger();
+app.UseSwaggerUI();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
