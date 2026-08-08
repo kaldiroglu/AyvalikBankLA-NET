@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Unit tests + shared HTTP contract
+    runs-on: ubuntu-latest
+
+    # Unlike the Java and Python implementations, this one has no in-memory run
+    # configuration: EF Core's InMemory provider is a test-only dependency, so the
+    # application itself needs a real PostgreSQL.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bankuser
+          POSTGRES_PASSWORD: bankpass
+          POSTGRES_DB: ayvalikbank_la_net
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bankuser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Unit and service tests
+        run: dotnet test -v minimal
+
+      # ── shared HTTP contract ──────────────────────────────────────────────
+      # AyvalikBankContractTests is one black-box suite run against all six
+      # implementations. It is what proves the six behave identically; without it
+      # a divergence between repositories goes unnoticed. It is also the only
+      # thing covering this repository's web layer - there are no controller
+      # tests here, which is how a culture-sensitive [Range] bound once broke
+      # every deposit, withdrawal and transfer unnoticed.
+      - name: Check out the shared contract suite
+        uses: actions/checkout@v4
+        with:
+          repository: kaldiroglu/AyvalikBankContractTests
+          path: contract-tests
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install the contract suite
+        run: pip install -e "./contract-tests[dev]"
+
+      - name: Start the application
+        run: |
+          nohup dotnet run --project AyvalikBankLA.Api \
+            --urls http://localhost:8080 > /tmp/app.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null -u "$ADMIN" http://localhost:8080/api/admin/customers; then
+              echo "application up after ~${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "application did not start within 90s"; tail -40 /tmp/app.log; exit 1
+        env:
+          ADMIN: 'admin@ayvalikbank.dev:Admin@123!'
+          ConnectionStrings__Default: 'Host=localhost;Port=5432;Database=ayvalikbank_la_net;Username=bankuser;Password=bankpass'
+
+      - name: Run the shared contract suite
+        run: pytest -q contract-tests/tests
+        env:
+          BANK_BASE_URL: http://localhost:8080
+
+      - name: Application log on failure
+        if: failure()
+        run: tail -80 /tmp/app.log || true
